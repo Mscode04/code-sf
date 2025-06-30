@@ -1,0 +1,203 @@
+/* Global Styling */
+
+
+.container {
+    max-width: 100%; /* Ensure full width */
+    padding: 0 15px;
+    height: 100%; /* Add a bit of padding for consistent spacing */
+    margin: 0 auto;
+    margin-bottom: -16px;
+    padding-bottom: 20px;
+    padding-top: 20px; /* Center the content */
+}
+
+
+
+/* Card Styling */
+.report-card {
+    border: none;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease-in-out;
+    background: linear-gradient(to bottom right, #ffffff, #f1f8fc); /* Soft gradient */
+    border-radius: 10px;
+}
+
+.report-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+}
+
+.report-card .card-title {
+    color: #0a9396; /* Healthcare green for headlines */
+}
+
+.report-card .card-text {
+    color: #4f646f; /* Subtle gray-blue for text */
+}
+
+/* Filter Section */
+.filter-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    padding: 20px;
+    
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.filter-container div {
+    flex: 1;
+    min-width: 200px;
+}
+
+.filter-container label {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 5px;
+    color: #0a9396; /* Accent color for labels */
+}
+
+.filter-container input,
+.filter-container select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 5px;
+    border: 1px solid #94d2bd; /* Subtle green border */
+}
+
+.preset-filters button,
+.apply-button {
+    background: linear-gradient(to right, #0a9396, #94d2bd); /* Trustworthy greens */
+    border: none;
+    color: white;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+}
+
+.preset-filters button:hover,
+.apply-button:hover {
+    background: #005f73; /* Darker green for hover state */
+}
+
+/* Add button styling for "Show All" */
+.preset-filters button {
+    margin: 5px;
+    padding: 10px 15px;
+    font-weight: bold;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background: linear-gradient(to right, #0a9396, #94d2bd);
+    color: white;
+    transition: background 0.3s ease;
+}
+
+.preset-filters button:hover {
+    background: #005f73;
+}
+
+.filter-buttons button {
+    margin: 5px;
+    padding: 10px 15px;
+    font-weight: bold;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background: linear-gradient(to right, #0a9396, #94d2bd);
+    color: white;
+    transition: background 0.3s ease;
+}
+
+.filter-buttons button:hover {
+    background: #005f73;
+}
+
+
+  
+ /* Login Page */
+.login-container {
+    position: relative; /* Set position to relative for pseudo-element positioning */
+    max-width: 400px;
+    margin: 50px auto;
+    padding: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.726);
+    border-radius: 10px;
+    text-align: center;
+    color: #253237;
+    z-index: 1; /* Ensure it appears above the pseudo-element */
+}
+
+.login-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.616); /* Transparent white overlay */
+    border-radius: 10px; /* Matches the container's radius */
+    z-index: -1; /* Places the overlay behind the content */
+}
+
+.login-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url('https://m.economictimes.com/thumb/msid-88966944,width-1200,height-900,resizemode-4,imgsize-22840/healthcare-g.jpg') center/cover no-repeat; /* Replace with the URL of your background image */
+    border-radius: 10px;
+    z-index: -2; /* Places the image behind the overlay */
+}
+
+.login-container form div {
+    margin-bottom: 15px;
+}
+
+.login-container label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #253237;
+}
+
+.login-container input {
+    width: 100%;
+    padding: 8px;
+    box-sizing: border-box;
+    border-radius: 5px;
+    border: 1px solid #9DB4C0;
+    background: #ffffff;
+    color: #253237;
+}
+
+.login-container button {
+    background-color: #5C6B73;
+    color: #E0FBFC;
+    border: none;
+    padding: 10px 15px;
+    cursor: pointer;
+    border-radius: 5px;
+    font-weight: bold;
+    transition: background 0.3s ease;
+}
+
+.login-container button:hover {
+    background-color: #9DB4C0;
+}
+
+.error {
+    color: red;
+    font-size: 0.9em;
+}
+.home-body{
+    background-color: #6db1b3;
+   
+}
+
