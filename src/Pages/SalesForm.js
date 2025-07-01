@@ -24,15 +24,15 @@ const SalesForm = () => {
     customerData: null,
     productId: "",
     productData: null,
-    salesQuantity: "",
-    emptyQuantity: "",
+    salesQuantity: 1,
+    emptyQuantity: 0,
     todayCredit: 0,
-    totalAmountReceived: "",
+    totalAmountReceived: 0,
     totalBalance: 0,
     previousBalance: 0,
     date: new Date().toISOString().split('T')[0],
     route: routeName,
-    customPrice: null // New field for custom pricing
+    customPrice: null
   });
 
   // Fetch customers and products
@@ -53,7 +53,7 @@ const SalesForm = () => {
           ...doc.data()
         }));
         
-        console.log("Fetched customers:", customersData); // Debug log
+        console.log("Fetched customers:", customersData);
         setCustomers(customersData);
         
         // 2. Fetch products
@@ -83,7 +83,7 @@ const SalesForm = () => {
   // Format customers for dropdown
   const customerOptions = customers.map(customer => ({
     value: customer.id || customer.docId,
-    label: `${customer.name} (${customer.phone}) - Balance: ₹${customer.currentBalance || 0}`,
+    label: `${customer.name} (${customer.phone}) - Balance: ₹${customer.currentBalance || 0} - Cylinders: ${customer.currentGasOnHand || 0}`,
     customer
   }));
 
@@ -104,7 +104,7 @@ const SalesForm = () => {
         customerId: selectedOption.value,
         customerData: customer,
         previousBalance: customer.currentBalance || 0,
-        totalBalance: (customer.currentBalance || 0) + prev.todayCredit - prev.totalAmountReceived
+        totalBalance: (customer.currentBalance || 0) + (prev.todayCredit || 0) - (prev.totalAmountReceived || 0)
       }));
     } else {
       setSelectedCustomer(null);
@@ -113,8 +113,8 @@ const SalesForm = () => {
         customerId: "",
         customerData: null,
         previousBalance: 0,
-        totalBalance: prev.todayCredit - prev.totalAmountReceived,
-        customPrice: null // Reset custom price when customer is cleared
+        totalBalance: (prev.todayCredit || 0) - (prev.totalAmountReceived || 0),
+        customPrice: null
       }));
     }
   };
@@ -128,9 +128,9 @@ const SalesForm = () => {
         ...prev,
         productId: selectedOption.value,
         productData: product,
-        customPrice: null, // Reset custom price when product changes
-        todayCredit: (prev.customPrice || product.price) * prev.salesQuantity,
-        totalBalance: (prev.previousBalance || 0) + ((prev.customPrice || product.price) * prev.salesQuantity) - prev.totalAmountReceived
+        customPrice: null,
+        todayCredit: (prev.customPrice || product.price) * (prev.salesQuantity || 0),
+        totalBalance: (prev.previousBalance || 0) + ((prev.customPrice || product.price) * (prev.salesQuantity || 0)) - (prev.totalAmountReceived || 0)
       }));
     } else {
       setSelectedProduct(null);
@@ -140,7 +140,7 @@ const SalesForm = () => {
         productData: null,
         customPrice: null,
         todayCredit: 0,
-        totalBalance: (prev.previousBalance || 0) - prev.totalAmountReceived
+        totalBalance: (prev.previousBalance || 0) - (prev.totalAmountReceived || 0)
       }));
     }
   };
@@ -154,12 +154,12 @@ const SalesForm = () => {
       const updatedData = {
         ...prev,
         customPrice: price > 0 ? price : null,
-        todayCredit: price > 0 ? price * prev.salesQuantity : (selectedProduct?.price || 0) * prev.salesQuantity
+        todayCredit: price > 0 ? price * (prev.salesQuantity || 0) : (selectedProduct?.price || 0) * (prev.salesQuantity || 0)
       };
       
       updatedData.totalBalance = (updatedData.previousBalance || 0) + 
-                               updatedData.todayCredit - 
-                               updatedData.totalAmountReceived;
+                               (updatedData.todayCredit || 0) - 
+                               (updatedData.totalAmountReceived || 0);
       
       return updatedData;
     });
@@ -169,19 +169,19 @@ const SalesForm = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     const newValue = name === "salesQuantity" || name === "emptyQuantity" || name === "totalAmountReceived" 
-      ? Math.max(0, parseInt(value) || 0)
+      ? parseInt(value) || 0
       : value;
     
     setFormData(prev => {
       const updatedData = { ...prev, [name]: newValue };
       
       // Recalculate balances when relevant fields change
-      if (name === "salesQuantity" || name === "totalAmountReceived") {
+      if (name === "salesQuantity" || name === "totalAmountReceived" || name === "emptyQuantity") {
         const currentPrice = prev.customPrice || selectedProduct?.price || 0;
-        updatedData.todayCredit = currentPrice * updatedData.salesQuantity;
+        updatedData.todayCredit = currentPrice * (updatedData.salesQuantity || 0);
         updatedData.totalBalance = (updatedData.previousBalance || 0) + 
-                                 updatedData.todayCredit - 
-                                 updatedData.totalAmountReceived;
+                                 (updatedData.todayCredit || 0) - 
+                                 (updatedData.totalAmountReceived || 0);
       }
       
       return updatedData;
@@ -198,9 +198,6 @@ const SalesForm = () => {
       if (!formData.customerId) throw new Error("Please select a customer");
       if (!formData.productId) throw new Error("Please select a product");
       if (formData.salesQuantity < 1) throw new Error("Sales quantity must be at least 1");
-      if (selectedCustomer && formData.emptyQuantity > selectedCustomer.currentGasOnHand) {
-        throw new Error(`Cannot take back more cylinders (${formData.emptyQuantity}) than customer has (${selectedCustomer.currentGasOnHand})`);
-      }
 
       // Determine the actual price used
       const actualPrice = formData.customPrice || selectedProduct.price;
@@ -212,9 +209,9 @@ const SalesForm = () => {
         customerPhone: selectedCustomer.phone,
         customerAddress: selectedCustomer.address,
         productName: selectedProduct.name,
-        productPrice: actualPrice, // Use the actual price (custom or default)
-        baseProductPrice: selectedProduct.price, // Store the base price for reference
-        isCustomPrice: formData.customPrice !== null, // Flag for custom pricing
+        productPrice: actualPrice,
+        baseProductPrice: selectedProduct.price,
+        isCustomPrice: formData.customPrice !== null,
         routeName: routeName,
         timestamp: new Date(),
         status: "completed"
@@ -360,7 +357,7 @@ const SalesForm = () => {
                     <p><strong>Current Balance:</strong> ₹{selectedCustomer.currentBalance || 0}</p>
                   </div>
                   <div className="col-md-4">
-                    <p><strong>Cylinders On Hand:</strong> {selectedCustomer.currentGasOnHand || 0}</p>
+                    <p><strong>Cylinders On Hand:</strong> {selectedCustomer.currentGasOnHand || 0} (can be negative)</p>
                   </div>
                 </div>
               </div>
@@ -459,12 +456,9 @@ const SalesForm = () => {
                       name="emptyQuantity"
                       value={formData.emptyQuantity}
                       onChange={handleChange}
-                      required
-                      min="0"
-                      max={selectedCustomer?.currentGasOnHand || 0}
                       disabled={loading.submitting}
                     />
-                    <small className="text-muted">Max: {selectedCustomer?.currentGasOnHand || 0}</small>
+                    <small className="text-muted">Can be any number (negative values allowed)</small>
                   </div>
                 </div>
                 
@@ -527,6 +521,7 @@ const SalesForm = () => {
                       }
                       readOnly
                     />
+                    <small className="text-muted">May be negative if returning more than current</small>
                   </div>
                 </div>
               </>
