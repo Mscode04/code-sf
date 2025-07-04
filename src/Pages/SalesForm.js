@@ -17,6 +17,7 @@ const SalesForm = () => {
     initial: true,
     submitting: false
   });
+  const [isPaymentOnly, setIsPaymentOnly] = useState(false);
   
   const [formData, setFormData] = useState({
     id: `TBG${new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14)}`,
@@ -27,12 +28,13 @@ const SalesForm = () => {
     salesQuantity: "",
     emptyQuantity: "",
     todayCredit: 0,
-    totalAmountReceived: 0,
+    totalAmountReceived: "",
     totalBalance: 0,
     previousBalance: 0,
     date: new Date().toISOString().split('T')[0],
     route: routeName,
-    customPrice: null
+    customPrice: null,
+    type: "sale" // 'sale' or 'payment'
   });
 
   // Fetch customers and products
@@ -79,6 +81,33 @@ const SalesForm = () => {
       toast.error("Route information not found. Please login again.");
     }
   }, [routeName]);
+
+  // Toggle between sale and payment mode
+  const togglePaymentOnly = () => {
+    setIsPaymentOnly(!isPaymentOnly);
+    if (!isPaymentOnly) {
+      // When switching to payment only mode, reset product-related fields
+      setSelectedProduct(null);
+      setFormData(prev => ({
+        ...prev,
+        productId: "",
+        productData: null,
+        salesQuantity: "",
+        emptyQuantity: "",
+        todayCredit: 0,
+        type: "payment",
+        totalBalance: (prev.previousBalance || 0) - (prev.totalAmountReceived || 0)
+      }));
+    } else {
+      // When switching back to sale mode, reset to defaults
+      setFormData(prev => ({
+        ...prev,
+        salesQuantity: 1,
+        type: "sale",
+        totalBalance: (prev.previousBalance || 0) + (prev.todayCredit || 0) - (prev.totalAmountReceived || 0)
+      }));
+    }
+  };
 
   // Format customers for dropdown
   const customerOptions = customers.map(customer => ({
@@ -178,7 +207,7 @@ const SalesForm = () => {
       // Recalculate balances when relevant fields change
       if (name === "salesQuantity" || name === "totalAmountReceived" || name === "emptyQuantity") {
         const currentPrice = prev.customPrice || selectedProduct?.price || 0;
-        updatedData.todayCredit = currentPrice * (updatedData.salesQuantity || 0);
+        updatedData.todayCredit = isPaymentOnly ? 0 : currentPrice * (updatedData.salesQuantity || 0);
         updatedData.totalBalance = (updatedData.previousBalance || 0) + 
                                  (updatedData.todayCredit || 0) - 
                                  (updatedData.totalAmountReceived || 0);
@@ -196,29 +225,36 @@ const SalesForm = () => {
     try {
       // Validate form
       if (!formData.customerId) throw new Error("Please select a customer");
-      if (!formData.productId) throw new Error("Please select a product");
-      if (formData.salesQuantity < 1) throw new Error("Sales quantity must be at least 1");
+      
+      if (!isPaymentOnly) {
+        // Validate sale-specific fields
+        if (!formData.productId) throw new Error("Please select a product");
+        if (formData.salesQuantity < 1) throw new Error("Sales quantity must be at least 1");
+      }
 
-      // Determine the actual price used
-      const actualPrice = formData.customPrice || selectedProduct.price;
-
-      // Prepare sale document
-      const saleData = {
+      // Prepare transaction document
+      const transactionData = {
         ...formData,
         customerName: selectedCustomer.name,
         customerPhone: selectedCustomer.phone,
         customerAddress: selectedCustomer.address,
-        productName: selectedProduct.name,
-        productPrice: actualPrice,
-        baseProductPrice: selectedProduct.price,
-        isCustomPrice: formData.customPrice !== null,
+        type: isPaymentOnly ? "payment" : "sale",
         routeName: routeName,
         timestamp: new Date(),
         status: "completed"
       };
 
-      // Add sale record
-      await addDoc(collection(db, "sales"), saleData);
+      // Add product details if it's a sale
+      if (!isPaymentOnly) {
+        const actualPrice = formData.customPrice || selectedProduct.price;
+        transactionData.productName = selectedProduct.name;
+        transactionData.productPrice = actualPrice;
+        transactionData.baseProductPrice = selectedProduct.price;
+        transactionData.isCustomPrice = formData.customPrice !== null;
+      }
+
+      // Add transaction record
+      await addDoc(collection(db, "sales"), transactionData);
       
       // Update customer document
       const customerQuery = query(
@@ -231,7 +267,9 @@ const SalesForm = () => {
         const customerDocRef = customerSnapshot.docs[0].ref;
         await updateDoc(customerDocRef, {
           currentBalance: formData.totalBalance,
-          currentGasOnHand: (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity,
+          currentGasOnHand: isPaymentOnly 
+            ? (selectedCustomer.currentGasOnHand || 0) 
+            : (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity,
           lastPurchaseDate: new Date()
         });
       }
@@ -243,7 +281,7 @@ const SalesForm = () => {
         customerData: null,
         productId: "",
         productData: null,
-        salesQuantity: 1,
+        salesQuantity: isPaymentOnly ? 0 : 1,
         emptyQuantity: 0,
         todayCredit: 0,
         totalAmountReceived: 0,
@@ -251,14 +289,15 @@ const SalesForm = () => {
         previousBalance: 0,
         date: new Date().toISOString().split('T')[0],
         route: routeName,
-        customPrice: null
+        customPrice: null,
+        type: isPaymentOnly ? "payment" : "sale"
       });
       setSelectedProduct(null);
       setSelectedCustomer(null);
       
-      toast.success("Sale recorded successfully!");
+      toast.success(isPaymentOnly ? "Payment recorded successfully!" : "Sale recorded successfully!");
     } catch (err) {
-      console.error("Error processing sale:", err);
+      console.error("Error processing transaction:", err);
       toast.error(err.message);
     } finally {
       setLoading(prev => ({ ...prev, submitting: false }));
@@ -281,15 +320,27 @@ const SalesForm = () => {
       <ToastContainer position="top-right" autoClose={3000} />
       
       <div className="card shadow">
-        <div className="card-header bg-primary text-white">
-          <h2 className="mb-0">New Sale</h2>
+        <div className="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+          <h2 className="mb-0">{isPaymentOnly ? "Payment" : "New Sale"}</h2>
+          <div className="form-check form-switch">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              id="paymentToggle"
+              checked={isPaymentOnly}
+              onChange={togglePaymentOnly}
+            />
+            <label className="form-check-label" htmlFor="paymentToggle">
+              {isPaymentOnly ? "Switch to Sale Mode" : "Switch to Payment Mode"}
+            </label>
+          </div>
         </div>
         
         <div className="card-body">
           <form onSubmit={handleSubmit}>
             <div className="row mb-3">
               <div className="col-md-6">
-                <label className="form-label">Sale ID</label>
+                <label className="form-label">Transaction ID</label>
                 <input
                   type="text"
                   className="form-control"
@@ -357,188 +408,197 @@ const SalesForm = () => {
                     <p><strong>Current Balance:</strong> ₹{selectedCustomer.currentBalance || 0}</p>
                   </div>
                   <div className="col-md-4">
-                    <p><strong>Cylinders On Hand:</strong> {selectedCustomer.currentGasOnHand || 0} (can be negative)</p>
+                    <p><strong>Cylinders On Hand:</strong> {selectedCustomer.currentGasOnHand || 0}</p>
+                  </div>
+                  <div className="col-md-4">
+                    <p><strong>New Balance After Transaction:</strong> ₹{formData.totalBalance}</p>
                   </div>
                 </div>
               </div>
             )}
             
+            {!isPaymentOnly && (
+              <>
+                <div className="row mb-3">
+                  <div className="col-md-12">
+                    <label className="form-label">Product</label>
+                    <Select
+                      options={productOptions}
+                      value={productOptions.find(option => option.value === formData.productId)}
+                      onChange={handleProductChange}
+                      placeholder="Select Product"
+                      isClearable
+                      isSearchable
+                      isLoading={loading.initial}
+                      noOptionsMessage={() => "No products found"}
+                      classNamePrefix="select"
+                      styles={{
+                        control: (base) => ({
+                          ...base,
+                          minHeight: '38px',
+                          borderColor: '#ced4da',
+                          '&:hover': {
+                            borderColor: '#ced4da'
+                          }
+                        })
+                      }}
+                    />
+                  </div>
+                </div>
+                
+                {selectedProduct && (
+                  <>
+                    <div className="row mb-3">
+                      <div className="col-md-4">
+                        <label className="form-label">Base Price (₹)</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={selectedProduct.price}
+                          readOnly
+                        />
+                      </div>
+                      
+                      <div className="col-md-4">
+                        <label className="form-label">
+                          Custom Price (₹) {formData.customPrice !== null && (
+                            <span className="badge bg-warning text-dark">Custom</span>
+                          )}
+                        </label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          name="customPrice"
+                          value={formData.customPrice || ''}
+                          onChange={handleCustomPriceChange}
+                          placeholder="Enter custom price"
+                          min="0"
+                          step="0.01"
+                          disabled={loading.submitting}
+                        />
+                      </div>
+                      
+                      <div className="col-md-4">
+                        <label className="form-label">Actual Price (₹)</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={formData.customPrice || selectedProduct.price}
+                          readOnly
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="row mb-3">
+                      <div className="col-md-4">
+                        <label className="form-label">Sales Quantity</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          name="salesQuantity"
+                          value={formData.salesQuantity}
+                          onChange={handleChange}
+                          
+                          
+                          disabled={loading.submitting}
+                        />
+                      </div>
+                      
+                      <div className="col-md-4">
+                        <label className="form-label">Empty Cylinders Returned</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          name="emptyQuantity"
+                          value={formData.emptyQuantity}
+                          onChange={handleChange}
+                          disabled={loading.submitting}
+                        />
+                        <small className="text-muted">Can be any number (negative values allowed)</small>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            
             <div className="row mb-3">
-              <div className="col-md-12">
-                <label className="form-label">Product</label>
-                <Select
-                  options={productOptions}
-                  value={productOptions.find(option => option.value === formData.productId)}
-                  onChange={handleProductChange}
-                  placeholder="Select Product"
-                  isClearable
-                  isSearchable
-                  isLoading={loading.initial}
-                  noOptionsMessage={() => "No products found"}
-                  classNamePrefix="select"
-                  styles={{
-                    control: (base) => ({
-                      ...base,
-                      minHeight: '38px',
-                      borderColor: '#ced4da',
-                      '&:hover': {
-                        borderColor: '#ced4da'
-                      }
-                    })
-                  }}
+              <div className="col-md-4">
+                <label className="form-label">Today's Credit (₹)</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={formData.todayCredit}
+                  readOnly
+                  disabled={isPaymentOnly}
+                />
+              </div>
+              
+              <div className="col-md-4">
+                <label className="form-label">Previous Balance (₹)</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={formData.previousBalance}
+                  readOnly
+                />
+              </div>
+              
+              <div className="col-md-4">
+                <label className="form-label">Amount Received (₹)</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="totalAmountReceived"
+                  value={formData.totalAmountReceived}
+                  onChange={handleChange}
+                  min="0"
+                  disabled={loading.submitting}
                 />
               </div>
             </div>
             
-            {selectedProduct && (
-              <>
-                <div className="row mb-3">
-                  <div className="col-md-4">
-                    <label className="form-label">Base Price (₹)</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={selectedProduct.price}
-                      readOnly
-                    />
-                  </div>
-                  
-                  <div className="col-md-4">
-                    <label className="form-label">
-                      Custom Price (₹) {formData.customPrice !== null && (
-                        <span className="badge bg-warning text-dark">Custom</span>
-                      )}
-                    </label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="customPrice"
-                      value={formData.customPrice || ''}
-                      onChange={handleCustomPriceChange}
-                      placeholder="Enter custom price"
-                      min="0"
-                      step="0.01"
-                      disabled={loading.submitting}
-                    />
-                  </div>
-                  
-                  <div className="col-md-4">
-                    <label className="form-label">Actual Price (₹)</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formData.customPrice || selectedProduct.price}
-                      readOnly
-                    />
-                  </div>
+            <div className="row mb-3">
+              <div className="col-md-6">
+                <label className="form-label">New Balance (₹)</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={formData.totalBalance}
+                  readOnly
+                />
+              </div>
+              
+              {!isPaymentOnly && (
+                <div className="col-md-6">
+                  <label className="form-label">New Cylinder Count</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={
+                      selectedCustomer 
+                        ? (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity
+                        : 0
+                    }
+                    readOnly
+                  />
+                  <small className="text-muted">May be negative if returning more than current</small>
                 </div>
-                
-                <div className="row mb-3">
-                  <div className="col-md-4">
-                    <label className="form-label">Sales Quantity</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="salesQuantity"
-                      value={formData.salesQuantity}
-                      onChange={handleChange}
-                      required
-                      min="1"
-                      disabled={loading.submitting}
-                    />
-                  </div>
-                  
-                  <div className="col-md-4">
-                    <label className="form-label">Empty Cylinders Returned</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="emptyQuantity"
-                      value={formData.emptyQuantity}
-                      onChange={handleChange}
-                      disabled={loading.submitting}
-                    />
-                    <small className="text-muted">Can be any number (negative values allowed)</small>
-                  </div>
-                </div>
-                
-                <div className="row mb-3">
-                  <div className="col-md-4">
-                    <label className="form-label">Today's Credit (₹)</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formData.todayCredit}
-                      readOnly
-                    />
-                  </div>
-                  
-                  <div className="col-md-4">
-                    <label className="form-label">Previous Balance (₹)</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formData.previousBalance}
-                      readOnly
-                    />
-                  </div>
-                  
-                  <div className="col-md-4">
-                    <label className="form-label">Amount Received (₹)</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="totalAmountReceived"
-                      value={formData.totalAmountReceived}
-                      onChange={handleChange}
-                      required
-                      min="0"
-                      disabled={loading.submitting}
-                    />
-                  </div>
-                </div>
-                
-                <div className="row mb-3">
-                  <div className="col-md-6">
-                    <label className="form-label">New Balance (₹)</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formData.totalBalance}
-                      readOnly
-                    />
-                  </div>
-                  
-                  <div className="col-md-6">
-                    <label className="form-label">New Cylinder Count</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={
-                        selectedCustomer 
-                          ? (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity
-                          : 0
-                      }
-                      readOnly
-                    />
-                    <small className="text-muted">May be negative if returning more than current</small>
-                  </div>
-                </div>
-              </>
-            )}
+              )}
+            </div>
             
             <div className="d-grid gap-2 mt-4">
               <button 
                 type="submit" 
                 className="btn btn-primary btn-lg mb-5"
-                disabled={loading.submitting || !selectedCustomer || !selectedProduct}
+                disabled={loading.submitting || !selectedCustomer || (!isPaymentOnly && !selectedProduct)}
               >
                 {loading.submitting ? (
                   <>
                     <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                     Processing...
                   </>
-                ) : "Record Sale"}
+                ) : isPaymentOnly ? "Record Payment" : "Record Sale"}
               </button>
             </div>
           </form>
