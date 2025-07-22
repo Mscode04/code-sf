@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../Firebase/config";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import { 
-  Typography, 
-  Box, 
-  Paper, 
+import {
+  Typography,
+  Box,
+  Paper,
   CircularProgress,
   Grid,
   Card,
@@ -40,14 +40,14 @@ const Dashboard = () => {
 
         const today = new Date();
         const todayDateString = format(today, 'yyyy-MM-dd');
-        
+
         const salesRef = collection(db, "sales");
         const q = query(
           salesRef,
           where("routeName", "==", storedRouteName),
           where("date", "==", todayDateString)
         );
-        
+
         const querySnapshot = await getDocs(q);
         const salesData = querySnapshot.docs.map(doc => {
           const data = doc.data();
@@ -67,7 +67,7 @@ const Dashboard = () => {
             timestamp: data.timestamp?.toDate() || new Date()
           };
         });
-        
+
         setTodaySales(salesData);
       } catch (err) {
         console.error("Error fetching sales:", err);
@@ -76,7 +76,7 @@ const Dashboard = () => {
         setLoading(false);
       }
     };
-    
+
     fetchTodaySales();
   }, []);
 
@@ -114,10 +114,10 @@ const Dashboard = () => {
       <Typography variant="subtitle1" color="textSecondary" gutterBottom>
         Route: {routeName} | {format(new Date(), 'MMMM do, yyyy')}
       </Typography>
-      
+
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 4 }}>
-            <Grid item xs={12} sm={6} md={4} lg={2}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
           <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2, borderLeft: `4px solid ${theme.palette.success.main}` }}>
             <Typography variant="subtitle2" color="textSecondary">Received</Typography>
             <Typography variant="h4" sx={{ fontWeight: 700 }}>₹{totalAmountReceived.toLocaleString()}</Typography>
@@ -147,7 +147,7 @@ const Dashboard = () => {
             <Typography variant="h4" sx={{ fontWeight: 700 }}>₹{totalCreditAmount.toLocaleString()}</Typography>
           </Paper>
         </Grid>
-    
+
         {/* <Grid item xs={12} sm={6} md={4} lg={2}>
           <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2, borderLeft: `4px solid ${theme.palette.error.main}` }}>
             <Typography variant="subtitle2" color="textSecondary">Balance</Typography>
@@ -155,12 +155,12 @@ const Dashboard = () => {
           </Paper>
         </Grid> */}
       </Grid>
-      
+
       {/* Sales Cards */}
       <Typography variant="h6" gutterBottom sx={{ mt: 2, fontWeight: 600 }}>
         Transaction Records ({todaySales.length})
       </Typography>
-      
+
       {todaySales.length === 0 ? (
         <Paper elevation={0} sx={{ p: 4, textAlign: 'center', backgroundColor: 'action.hover' }}>
           <Typography variant="body1">No sales recorded for today</Typography>
@@ -169,10 +169,10 @@ const Dashboard = () => {
         <Grid container spacing={2} className="mb-5">
           {todaySales.map((sale) => (
             <Grid item xs={12} sm={6} md={4} key={sale.id}>
-              <Card 
-                elevation={3} 
-                
-                sx={{ 
+              <Card
+                elevation={3}
+
+                sx={{
                   borderRadius: 2,
                   transition: 'transform 0.2s',
                   '&:hover': {
@@ -181,24 +181,24 @@ const Dashboard = () => {
                   }
                 }}
               >
-                <CardContent  className="cursor-pointer">
+                <CardContent className="cursor-pointer">
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                       {sale.customerName}
                     </Typography>
-                    <Chip 
-                      label={sale.status} 
-                      size="small" 
+                    <Chip
+                      label={sale.status}
+                      size="small"
                       color={sale.status === 'completed' ? 'success' : 'warning'}
                     />
                   </Box>
-                  
+
                   <Typography variant="body2" color="textSecondary" gutterBottom>
                     {sale.customerPhone} • {format(sale.timestamp, 'hh:mm a')}
                   </Typography>
-                  
+
                   <Divider sx={{ my: 1 }} />
-                  
+
                   <Grid container spacing={1} sx={{ mt: 1 }}>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="textSecondary">Product</Typography>
@@ -217,9 +217,9 @@ const Dashboard = () => {
                       <Typography variant="body1">{sale.emptyQuantity}</Typography>
                     </Grid>
                   </Grid>
-                  
+
                   <Divider sx={{ my: 1 }} />
-                  
+
                   <Box display="flex" justifyContent="space-between" alignItems="center">
                     <Box>
                       <Typography variant="body2" color="textSecondary">Received</Typography>
@@ -228,17 +228,22 @@ const Dashboard = () => {
                       </Typography>
                     </Box>
                     <Box textAlign="right">
-                      <Typography variant="body2" color="textSecondary">Credit</Typography>
-                      <Typography 
-                        variant="body1" 
-                        sx={{ 
+                      <Typography variant="body2" color="textSecondary">
+                        Credit
+                      </Typography>
+                      <Typography
+                        variant="body1"
+                        sx={{
                           fontWeight: 600,
-                          color: sale.todayCredit > 0 ? theme.palette.warning.main : 'text.primary'
+                          color: (sale.todayCredit - sale.totalAmountReceived) > 0
+                            ? theme.palette.warning.main
+                            : 'text.primary'
                         }}
                       >
-                        ₹{sale.todayCredit.toLocaleString()}
+                        ₹{(sale.todayCredit - sale.totalAmountReceived).toLocaleString()}
                       </Typography>
                     </Box>
+
                   </Box>
                 </CardContent>
               </Card>
