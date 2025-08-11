@@ -202,10 +202,10 @@ const SalesReports = () => {
                 className="sales-card"
                 onClick={() => handleCardClick(sale.id)}
               >
-                <div className="card-header">
+                {/* <div className="card-header">
                   <span className="card-time">{formatTime(sale.timestamp)}</span>
                   <span className="card-amount">{formatCurrency(sale.totalAmountReceived)}</span>
-                </div>
+                </div> */}
                 
                 <div className="card-customer">
                   <h3>{sale.customerData?.name || 'Unknown'}</h3>

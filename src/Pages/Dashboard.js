@@ -13,24 +13,28 @@ import {
   Chip,
   useTheme,
   useMediaQuery,
-  Button,
-  IconButton
+  Button
 } from "@mui/material";
 import { format } from 'date-fns';
 import { useNavigate } from "react-router-dom";
-import { FiEye } from "react-icons/fi";
+import { FiEye, FiPhone, FiDollarSign, FiPackage, FiHash, FiRepeat, FiCreditCard } from "react-icons/fi";
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 const Dashboard = () => {
   const [todaySales, setTodaySales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [routeName, setRouteName] = useState("");
+  const [todayTotalSaleAmount, setTodayTotalSaleAmount] = useState(0);
+  const [todayTotalReceived, setTodayTotalReceived] = useState(0);
+  const [todayTotalCredit, setTodayTotalCredit] = useState(0);
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   useEffect(() => {
-    const fetchTodaySales = async () => {
+    const fetchData = async () => {
       try {
         const storedRouteName = localStorage.getItem("routeName");
         if (!storedRouteName) {
@@ -38,37 +42,50 @@ const Dashboard = () => {
         }
         setRouteName(storedRouteName);
 
-        const today = new Date();
-        const todayDateString = format(today, 'yyyy-MM-dd');
-
+        const today = format(new Date(), 'yyyy-MM-dd');
         const salesRef = collection(db, "sales");
         const q = query(
           salesRef,
-          where("routeName", "==", storedRouteName),
-          where("date", "==", todayDateString)
+          where("route", "==", storedRouteName),
+          where("date", "==", today)
         );
 
         const querySnapshot = await getDocs(q);
-        const salesData = querySnapshot.docs.map(doc => {
+        const salesData = [];
+        let totalSaleValue = 0;
+        let totalReceived = 0;
+        let totalCredit = 0;
+
+        querySnapshot.forEach(doc => {
           const data = doc.data();
-          return {
-            id: doc.id, // Firebase document ID
-            customerName: data.customerName || "",
-            customerPhone: data.customerPhone || "",
-            productName: data.productName || "",
-            productPrice: data.productPrice || 0,
-            salesQuantity: data.salesQuantity || 0,
-            emptyQuantity: data.emptyQuantity || 0,
+          const price = data.productPrice || data.productData?.price || 0;
+          const qty = data.salesQuantity || 0;
+          const saleAmount = price * qty;
+          
+          const sale = {
+            id: doc.id,
+            ...data,
+            timestamp: data.timestamp?.toDate() || new Date(),
             todayCredit: data.todayCredit || 0,
             totalAmountReceived: data.totalAmountReceived || 0,
             totalBalance: data.totalBalance || 0,
-            status: data.status || "completed",
-            date: data.date || todayDateString,
-            timestamp: data.timestamp?.toDate() || new Date()
+            previousBalance: data.previousBalance || 0,
+            saleAmount: saleAmount
           };
+
+          if (data.type === 'sale' || data.transactionType === 'sale') {
+            totalSaleValue += saleAmount;
+            totalCredit += (saleAmount - (data.totalAmountReceived || 0));
+          }
+          totalReceived += data.totalAmountReceived || 0;
+
+          salesData.push(sale);
         });
 
         setTodaySales(salesData);
+        setTodayTotalSaleAmount(totalSaleValue);
+        setTodayTotalReceived(totalReceived);
+        setTodayTotalCredit(totalCredit);
       } catch (err) {
         console.error("Error fetching sales:", err);
         setError(err.message || "Failed to load today's sales");
@@ -77,18 +94,34 @@ const Dashboard = () => {
       }
     };
 
-    fetchTodaySales();
+    fetchData();
   }, []);
 
-
-
   // Calculate totals
-  const totalSalesQty = todaySales.reduce((sum, sale) => sum + (sale.salesQuantity || 0), 0);
-  const totalEmptyQty = todaySales.reduce((sum, sale) => sum + (sale.emptyQuantity || 0), 0);
-  const totalCreditAmount = todaySales.reduce((sum, sale) => sum + (sale.todayCredit || 0), 0);
-  const totalAmountReceived = todaySales.reduce((sum, sale) => sum + (sale.totalAmountReceived || 0), 0);
-  const totalBalance = todaySales.reduce((sum, sale) => sum + (sale.totalBalance || 0), 0);
-  const reportCount = todaySales.length;
+  const totalSalesQty = todaySales.reduce((sum, sale) => 
+    (sale.type === 'sale' || sale.transactionType === 'sale') ? sum + (sale.salesQuantity || 0) : sum, 0);
+  
+  const totalEmptyQty = todaySales.reduce((sum, sale) => 
+    (sale.type === 'sale' || sale.transactionType === 'sale') ? sum + (sale.emptyQuantity || 0) : sum, 0);
+  
+  const totalTransactions = todaySales.length;
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2
+    }).format(amount || 0);
+  };
+
+  const formatDate = (date) => {
+    if (!date) return 'N/A';
+    return format(date, 'hh:mm a');
+  };
+
+  const handleViewDetails = (sale) => {
+    navigate(`/sales/${sale.id}`, { state: { sale } });
+  };
 
   if (loading) {
     return (
@@ -108,142 +141,172 @@ const Dashboard = () => {
 
   return (
     <Box sx={{ p: isMobile ? 1 : 3 }}>
-      <Typography variant="h4" gutterBottom sx={{ fontWeight: 600 }}>
-        Today's Sales
-      </Typography>
-      <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-        Route: {routeName} | {format(new Date(), 'MMMM do, yyyy')}
-      </Typography>
+      <ToastContainer position="top-right" autoClose={3000} />
+      
+      {/* Summary Section */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" gutterBottom sx={{ fontWeight: 600 }}>
+          Today's Dashboard
+        </Typography>
+        <Typography variant="subtitle1" color="textSecondary" gutterBottom>
+          Route: {routeName} | {format(new Date(), 'MMMM do, yyyy')}
+        </Typography>
 
-      {/* Summary Cards */}
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={4} lg={2}>
-          <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2, borderLeft: `4px solid ${theme.palette.success.main}` }}>
-            <Typography variant="subtitle2" color="textSecondary">Received</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>₹{totalAmountReceived.toLocaleString()}</Typography>
-          </Paper>
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Paper elevation={3} sx={{ p: 2, borderRadius: 2, borderLeft: '4px solid #4caf50' }}>
+              <Typography variant="subtitle2" color="textSecondary">Total Sales Value</Typography>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                {formatCurrency(todayTotalSaleAmount)}
+              </Typography>
+            </Paper>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Paper elevation={3} sx={{ p: 2, borderRadius: 2, borderLeft: '4px solid #2196f3' }}>
+              <Typography variant="subtitle2" color="textSecondary">Total Received</Typography>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                {formatCurrency(todayTotalReceived)}
+              </Typography>
+            </Paper>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Paper elevation={3} sx={{ p: 2, borderRadius: 2, borderLeft: '4px solid #ff9800' }}>
+              <Typography variant="subtitle2" color="textSecondary">Total Credit</Typography>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                {formatCurrency(todayTotalCredit)}
+              </Typography>
+            </Paper>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Paper elevation={3} sx={{ p: 2, borderRadius: 2, borderLeft: '4px solid #9c27b0' }}>
+              <Typography variant="subtitle2" color="textSecondary">Transactions</Typography>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>{totalTransactions}</Typography>
+            </Paper>
+          </Grid>
         </Grid>
-        <Grid item xs={12} sm={6} md={4} lg={2}>
-          <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2 }}>
-            <Typography variant="subtitle2" color="textSecondary">Total Sales</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>{reportCount}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4} lg={2}>
-          <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2 }}>
-            <Typography variant="subtitle2" color="textSecondary">Sales Qty</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>{totalSalesQty}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4} lg={2}>
-          <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2 }}>
-            <Typography variant="subtitle2" color="textSecondary">Empty Qty</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>{totalEmptyQty}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4} lg={2}>
-          <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2, borderLeft: `4px solid ${theme.palette.warning.main}` }}>
-            <Typography variant="subtitle2" color="textSecondary">Credit</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>₹{totalCreditAmount.toLocaleString()}</Typography>
-          </Paper>
-        </Grid>
+      </Box>
 
-        {/* <Grid item xs={12} sm={6} md={4} lg={2}>
-          <Paper elevation={3} sx={{ p: 2, height: '100%', borderRadius: 2, borderLeft: `4px solid ${theme.palette.error.main}` }}>
-            <Typography variant="subtitle2" color="textSecondary">Balance</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>₹{totalBalance.toLocaleString()}</Typography>
-          </Paper>
-        </Grid> */}
-      </Grid>
-
-      {/* Sales Cards */}
-      <Typography variant="h6" gutterBottom sx={{ mt: 2, fontWeight: 600 }}>
-        Transaction Records ({todaySales.length})
+      {/* Transactions List */}
+      <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, mt: 3 }}>
+        Recent Transactions ({todaySales.length})
       </Typography>
 
       {todaySales.length === 0 ? (
         <Paper elevation={0} sx={{ p: 4, textAlign: 'center', backgroundColor: 'action.hover' }}>
-          <Typography variant="body1">No sales recorded for today</Typography>
+          <Typography variant="body1">No transactions recorded for today</Typography>
         </Paper>
       ) : (
-        <Grid container spacing={2} className="mb-5">
+        <Grid container spacing={2}>
           {todaySales.map((sale) => (
             <Grid item xs={12} sm={6} md={4} key={sale.id}>
-              <Card
-                elevation={3}
-
-                sx={{
-                  borderRadius: 2,
-                  transition: 'transform 0.2s',
-                  '&:hover': {
-                    transform: 'translateY(-4px)',
-                    boxShadow: theme.shadows[6]
-                  }
-                }}
-              >
-                <CardContent className="cursor-pointer">
+              <Card elevation={3} sx={{ borderRadius: 2, height: '100%' }}>
+                <CardContent>
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                      {sale.customerName}
+                      {sale.customerName || sale.customerData?.name}
                     </Typography>
                     <Chip
-                      label={sale.status}
+                      label={sale.type === 'payment' || sale.transactionType === 'payment' ? 'Payment' : 'Sale'}
                       size="small"
-                      color={sale.status === 'completed' ? 'success' : 'warning'}
+                      color={sale.type === 'payment' || sale.transactionType === 'payment' ? 'success' : 'primary'}
                     />
                   </Box>
 
                   <Typography variant="body2" color="textSecondary" gutterBottom>
-                    {sale.customerPhone} • {format(sale.timestamp, 'hh:mm a')}
+                    <FiPhone size={14} style={{ marginRight: 4 }} />
+                    {sale.customerPhone || sale.customerData?.phone} • {formatDate(sale.timestamp)}
                   </Typography>
 
                   <Divider sx={{ my: 1 }} />
 
-                  <Grid container spacing={1} sx={{ mt: 1 }}>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">Product</Typography>
-                      <Typography variant="body1">{sale.productName}</Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">Price</Typography>
-                      <Typography variant="body1">₹{sale.productPrice}</Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">Quantity</Typography>
-                      <Typography variant="body1">{sale.salesQuantity}</Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">Empty</Typography>
-                      <Typography variant="body1">{sale.emptyQuantity}</Typography>
-                    </Grid>
-                  </Grid>
+                  {(sale.type === 'sale' || sale.transactionType === 'sale') && (
+                    <>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2" color="textSecondary">
+                          <FiPackage size={14} style={{ marginRight: 4 }} />
+                          Product
+                        </Typography>
+                        <Typography variant="body2">
+                          {sale.productName || sale.productData?.name}
+                        </Typography>
+                      </Box>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2" color="textSecondary">
+                          <FiHash size={14} style={{ marginRight: 4 }} />
+                          Quantity
+                        </Typography>
+                        <Typography variant="body2">{sale.salesQuantity}</Typography>
+                      </Box>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2" color="textSecondary">
+                          <FiDollarSign size={14} style={{ marginRight: 4 }} />
+                          Sale Amount
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {formatCurrency(sale.saleAmount)}
+                        </Typography>
+                      </Box>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2" color="textSecondary">
+                          <FiRepeat size={14} style={{ marginRight: 4 }} />
+                          Empty Returned
+                        </Typography>
+                        <Typography variant="body2">{sale.emptyQuantity}</Typography>
+                      </Box>
+                      <Divider sx={{ my: 1 }} />
+                    </>
+                  )}
 
-                  <Divider sx={{ my: 1 }} />
+                  <Box display="flex" justifyContent="space-between" mb={1}>
+                    <Typography variant="body2" color="textSecondary">
+                      <FiDollarSign size={14} style={{ marginRight: 4 }} />
+                      Amount Received
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                      {formatCurrency(sale.totalAmountReceived)}
+                    </Typography>
+                  </Box>
 
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box>
-                      <Typography variant="body2" color="textSecondary">Received</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                        ₹{sale.totalAmountReceived.toLocaleString()}
-                      </Typography>
-                    </Box>
-                    <Box textAlign="right">
-                      <Typography variant="body2" color="textSecondary">
-                        Credit
-                      </Typography>
-                      <Typography
-                        variant="body1"
-                        sx={{
-                          fontWeight: 600,
-                          color: (sale.todayCredit - sale.totalAmountReceived) > 0
-                            ? theme.palette.warning.main
-                            : 'text.primary'
-                        }}
-                      >
-                        ₹{(sale.todayCredit - sale.totalAmountReceived).toLocaleString()}
-                      </Typography>
-                    </Box>
+                  <Box display="flex" justifyContent="space-between" mb={1}>
+                    <Typography variant="body2" color="textSecondary">
+                      <FiCreditCard size={14} style={{ marginRight: 4 }} />
+                      Credit
+                    </Typography>
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        fontWeight: 500,
+                        color: (sale.saleAmount - sale.totalAmountReceived) > 0 ? 'warning.main' : 'success.main'
+                      }}
+                    >
+                      {formatCurrency(sale.saleAmount - sale.totalAmountReceived)}
+                    </Typography>
+                  </Box>
 
+                  {/* <Box display="flex" justifyContent="space-between">
+                    <Typography variant="body2" color="textSecondary">
+                      Balance
+                    </Typography>
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        fontWeight: 500,
+                        color: sale.totalBalance < 0 ? 'error.main' : 'success.main'
+                      }}
+                    >
+                      {formatCurrency(sale.totalBalance)}
+                    </Typography>
+                  </Box> */}
+
+                  <Box mt={2} display="flex" justifyContent="flex-end">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<FiEye />}
+                      onClick={() => handleViewDetails(sale)}
+                    >
+                      View Details
+                    </Button>
                   </Box>
                 </CardContent>
               </Card>

@@ -13,11 +13,10 @@ const SalesForm = () => {
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [loading, setLoading] = useState({
-    initial: true,
-    submitting: false
-  });
   const [isPaymentOnly, setIsPaymentOnly] = useState(false);
+  const [todayTotalSale, setTodayTotalSale] = useState(0);
+  const [loadingTodaySale, setLoadingTodaySale] = useState(true);
+  const [todaySaleAmount, setTodaySaleAmount] = useState(0);
   
   const [formData, setFormData] = useState({
     id: `TBG${new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14)}`,
@@ -25,28 +24,54 @@ const SalesForm = () => {
     customerData: null,
     productId: "",
     productData: null,
-    salesQuantity: "",
-    emptyQuantity: "",
+    salesQuantity: 0,
+    emptyQuantity: 0,
     todayCredit: 0,
-    totalAmountReceived: "",
+    totalAmountReceived: 0,
     totalBalance: 0,
     previousBalance: 0,
     date: new Date().toISOString().split('T')[0],
     route: routeName,
     customPrice: null,
-    type: "sale" // 'sale' or 'payment'
+    transactionType: "sale" // 'sale' or 'payment'
   });
+
+  // Fetch today's total sales amount
+  useEffect(() => {
+    const fetchTodayTotalSale = async () => {
+      setLoadingTodaySale(true);
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const salesQuery = query(
+          collection(db, "sales"),
+          where("date", "==", today),
+          where("transactionType", "==", "sale")
+        );
+        const snapshot = await getDocs(salesQuery);
+        let total = 0;
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const price = data.productPrice || 0;
+          const qty = data.salesQuantity || 0;
+          total += price * qty;
+        });
+        setTodayTotalSale(total);
+      } catch (err) {
+        setTodayTotalSale(0);
+      }
+      setLoadingTodaySale(false);
+    };
+    fetchTodayTotalSale();
+  }, []);
 
   // Fetch customers and products
   useEffect(() => {
     const fetchData = async () => {
       try {
-        setLoading(prev => ({ ...prev, initial: true }));
-        
         // 1. Fetch customers
         const customersQuery = query(
           collection(db, "customers"),
-          // where("route", "==", routeName)
+          where("route", "==", routeName)
         );
         const customersSnapshot = await getDocs(customersQuery);
         
@@ -55,7 +80,6 @@ const SalesForm = () => {
           ...doc.data()
         }));
         
-        console.log("Fetched customers:", customersData);
         setCustomers(customersData);
         
         // 2. Fetch products
@@ -70,8 +94,6 @@ const SalesForm = () => {
       } catch (err) {
         console.error("Error fetching data:", err);
         toast.error(`Error loading data: ${err.message}`);
-      } finally {
-        setLoading(prev => ({ ...prev, initial: false }));
       }
     };
     
@@ -82,100 +104,107 @@ const SalesForm = () => {
     }
   }, [routeName]);
 
+  // Update customer details when customerId changes
+  useEffect(() => {
+    if (formData.customerId) {
+      const customer = customers.find(c => c.id === formData.customerId || c.docId === formData.customerId);
+      if (customer) {
+        setSelectedCustomer(customer);
+        setFormData(prev => ({
+          ...prev,
+          customerData: customer,
+          previousBalance: customer.currentBalance || 0,
+          totalBalance: (customer.currentBalance || 0) + (prev.todayCredit || 0) - (prev.totalAmountReceived || 0)
+        }));
+      }
+    }
+  }, [formData.customerId, customers]);
+
+  // Update product details when productId changes
+  useEffect(() => {
+    if (formData.productId && !isPaymentOnly) {
+      const product = products.find(p => p.id === formData.productId || p.docId === formData.productId);
+      if (product) {
+        setSelectedProduct(product);
+        setFormData(prev => ({
+          ...prev,
+          productData: product,
+          todayCredit: (prev.customPrice || product.price) * (prev.salesQuantity || 0),
+          totalBalance: (prev.previousBalance || 0) + ((prev.customPrice || product.price) * (prev.salesQuantity || 0)) - (prev.totalAmountReceived || 0)
+        }));
+      }
+    }
+  }, [formData.productId, products, isPaymentOnly]);
+
+  // Calculate balances when relevant fields change
+  useEffect(() => {
+    if ((selectedProduct && formData.salesQuantity) || isPaymentOnly) {
+      const currentPrice = isPaymentOnly ? 0 : (formData.customPrice || selectedProduct?.price || 0);
+      const saleQty = Number(formData.salesQuantity || 0);
+      const amountReceived = Number(formData.totalAmountReceived) || 0;
+      const saleAmount = isPaymentOnly ? 0 : currentPrice * saleQty;
+      const todayCredit = saleAmount - amountReceived;
+      const previousBalance = Number(formData.previousBalance) || 0;
+      const totalBalance = previousBalance + todayCredit;
+      
+      setTodaySaleAmount(saleAmount);
+
+      setFormData(prev => ({
+        ...prev,
+        todayCredit,
+        totalBalance
+      }));
+    }
+  }, [selectedProduct, formData.salesQuantity, formData.totalAmountReceived, formData.previousBalance, formData.customPrice, isPaymentOnly]);
+
   // Toggle between sale and payment mode
-  const togglePaymentOnly = () => {
+  const togglePaymentMode = () => {
     setIsPaymentOnly(!isPaymentOnly);
+    setFormData(prev => ({
+      ...prev,
+      transactionType: !isPaymentOnly ? "payment" : "sale",
+      productId: !isPaymentOnly ? "" : prev.productId,
+      productData: !isPaymentOnly ? null : prev.productData,
+      salesQuantity: !isPaymentOnly ? 0 : prev.salesQuantity,
+      emptyQuantity: !isPaymentOnly ? 0 : prev.emptyQuantity,
+      todayCredit: !isPaymentOnly ? 0 : prev.todayCredit,
+      customPrice: !isPaymentOnly ? null : prev.customPrice
+    }));
+    
     if (!isPaymentOnly) {
-      // When switching to payment only mode, reset product-related fields
       setSelectedProduct(null);
-      setFormData(prev => ({
-        ...prev,
-        productId: "",
-        productData: null,
-        salesQuantity: "",
-        emptyQuantity: "",
-        todayCredit: 0,
-        type: "payment",
-        totalBalance: (prev.previousBalance || 0) - (prev.totalAmountReceived || 0)
-      }));
-    } else {
-      // When switching back to sale mode, reset to defaults
-      setFormData(prev => ({
-        ...prev,
-        salesQuantity: 1,
-        type: "sale",
-        totalBalance: (prev.previousBalance || 0) + (prev.todayCredit || 0) - (prev.totalAmountReceived || 0)
-      }));
     }
   };
 
   // Format customers for dropdown
   const customerOptions = customers.map(customer => ({
     value: customer.id || customer.docId,
-    label: `${customer.name} (${customer.phone}) - Balance: ₹${customer.currentBalance || 0} - Cylinders: ${customer.currentGasOnHand || 0}`,
-    customer
+    label: `${customer.name} (${customer.phone}) - Balance: ₹${customer.currentBalance || 0} - Gas: ${customer.currentGasOnHand || 0}`,
+    data: customer
   }));
 
   // Format products for dropdown
   const productOptions = products.map(product => ({
     value: product.id || product.docId,
     label: `${product.name} (₹${product.price})`,
-    product
+    data: product
   }));
 
-  // Handle customer selection
-  const handleCustomerChange = (selectedOption) => {
-    if (selectedOption) {
-      const customer = selectedOption.customer;
-      setSelectedCustomer(customer);
-      setFormData(prev => ({
-        ...prev,
-        customerId: selectedOption.value,
-        customerData: customer,
-        previousBalance: customer.currentBalance || 0,
-        totalBalance: (customer.currentBalance || 0) + (prev.todayCredit || 0) - (prev.totalAmountReceived || 0)
-      }));
-    } else {
-      setSelectedCustomer(null);
-      setFormData(prev => ({
-        ...prev,
-        customerId: "",
-        customerData: null,
-        previousBalance: 0,
-        totalBalance: (prev.todayCredit || 0) - (prev.totalAmountReceived || 0),
-        customPrice: null
-      }));
-    }
-  };
-
-  // Handle product selection
-  const handleProductChange = (selectedOption) => {
-    if (selectedOption) {
-      const product = selectedOption.product;
-      setSelectedProduct(product);
-      setFormData(prev => ({
-        ...prev,
-        productId: selectedOption.value,
-        productData: product,
-        customPrice: null,
-        todayCredit: (prev.customPrice || product.price) * (prev.salesQuantity || 0),
-        totalBalance: (prev.previousBalance || 0) + ((prev.customPrice || product.price) * (prev.salesQuantity || 0)) - (prev.totalAmountReceived || 0)
-      }));
-    } else {
-      setSelectedProduct(null);
-      setFormData(prev => ({
-        ...prev,
-        productId: "",
-        productData: null,
-        customPrice: null,
-        todayCredit: 0,
-        totalBalance: (prev.previousBalance || 0) - (prev.totalAmountReceived || 0)
-      }));
-    }
+  // Handle form field changes
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ 
+      ...prev, 
+      [name]: name === "salesQuantity" || name === "emptyQuantity" || name === "totalAmountReceived" || name === "customPrice"
+        ? Number(value) || 0 
+        : value 
+    }));
   };
 
   // Handle custom price change
   const handleCustomPriceChange = (e) => {
+    if (isPaymentOnly) return;
+    
     const { value } = e.target;
     const price = parseFloat(value) || 0;
     
@@ -187,61 +216,64 @@ const SalesForm = () => {
       };
       
       updatedData.totalBalance = (updatedData.previousBalance || 0) + 
-                               (updatedData.todayCredit || 0) - 
+                               updatedData.todayCredit - 
                                (updatedData.totalAmountReceived || 0);
       
       return updatedData;
     });
   };
 
-  // Handle form field changes
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    const newValue = name === "salesQuantity" || name === "emptyQuantity" || name === "totalAmountReceived" 
-      ? parseInt(value) || 0
-      : value;
+  // Handle customer selection
+  const handleCustomerChange = (selectedOption) => {
+    setFormData(prev => ({
+      ...prev,
+      customerId: selectedOption ? selectedOption.value : "",
+      customerData: selectedOption ? selectedOption.data : null,
+      customPrice: null
+    }));
+  };
+
+  // Handle product selection
+  const handleProductChange = (selectedOption) => {
+    if (isPaymentOnly) return;
     
-    setFormData(prev => {
-      const updatedData = { ...prev, [name]: newValue };
-      
-      // Recalculate balances when relevant fields change
-      if (name === "salesQuantity" || name === "totalAmountReceived" || name === "emptyQuantity") {
-        const currentPrice = prev.customPrice || selectedProduct?.price || 0;
-        updatedData.todayCredit = isPaymentOnly ? 0 : currentPrice * (updatedData.salesQuantity || 0);
-        updatedData.totalBalance = (updatedData.previousBalance || 0) + 
-                                 (updatedData.todayCredit || 0) - 
-                                 (updatedData.totalAmountReceived || 0);
-      }
-      
-      return updatedData;
-    });
+    setFormData(prev => ({
+      ...prev,
+      productId: selectedOption ? selectedOption.value : "",
+      productData: selectedOption ? selectedOption.data : null,
+      customPrice: null
+    }));
   };
 
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(prev => ({ ...prev, submitting: true }));
+    
+    if (!selectedCustomer) {
+      toast.error("Please select a customer");
+      return;
+    }
+
+    if (!isPaymentOnly && !selectedProduct) {
+      toast.error("Please select a product");
+      return;
+    }
+
+    if (!isPaymentOnly && formData.salesQuantity <= 0) {
+      toast.error("Sales quantity must be greater than 0");
+      return;
+    }
 
     try {
-      // Validate form
-      if (!formData.customerId) throw new Error("Please select a customer");
-      
-      if (!isPaymentOnly) {
-        // Validate sale-specific fields
-        if (!formData.productId) throw new Error("Please select a product");
-        if (formData.salesQuantity < 1) throw new Error("Sales quantity must be at least 1");
-      }
-
-      // Prepare transaction document
+      // Prepare transaction data
       const transactionData = {
         ...formData,
         customerName: selectedCustomer.name,
         customerPhone: selectedCustomer.phone,
         customerAddress: selectedCustomer.address,
-        type: isPaymentOnly ? "payment" : "sale",
         routeName: routeName,
         timestamp: new Date(),
-        status: "completed"
+        transactionType: isPaymentOnly ? "payment" : "sale"
       };
 
       // Add product details if it's a sale
@@ -251,9 +283,18 @@ const SalesForm = () => {
         transactionData.productPrice = actualPrice;
         transactionData.baseProductPrice = selectedProduct.price;
         transactionData.isCustomPrice = formData.customPrice !== null;
+      } else {
+        // For payments, clear product-related fields
+        transactionData.productName = "";
+        transactionData.productPrice = 0;
+        transactionData.baseProductPrice = 0;
+        transactionData.isCustomPrice = false;
+        transactionData.salesQuantity = 0;
+        transactionData.emptyQuantity = 0;
+        transactionData.todayCredit = 0;
       }
 
-      // Add transaction record
+      // Add transaction to sales collection
       await addDoc(collection(db, "sales"), transactionData);
       
       // Update customer document
@@ -261,19 +302,21 @@ const SalesForm = () => {
         collection(db, "customers"),
         where("id", "==", formData.customerId)
       );
-      const customerSnapshot = await getDocs(customerQuery);
       
-      if (!customerSnapshot.empty) {
-        const customerDocRef = customerSnapshot.docs[0].ref;
+      const querySnapshot = await getDocs(customerQuery);
+      if (!querySnapshot.empty) {
+        const customerDocRef = querySnapshot.docs[0].ref;
         await updateDoc(customerDocRef, {
           currentBalance: formData.totalBalance,
           currentGasOnHand: isPaymentOnly 
-            ? (selectedCustomer.currentGasOnHand || 0) 
+            ? (selectedCustomer.currentGasOnHand || 0)
             : (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity,
           lastPurchaseDate: new Date()
         });
       }
-
+      
+      toast.success(isPaymentOnly ? "Payment recorded successfully!" : "Sale recorded successfully!");
+      
       // Reset form
       setFormData({
         id: `TBG${new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14)}`,
@@ -281,7 +324,7 @@ const SalesForm = () => {
         customerData: null,
         productId: "",
         productData: null,
-        salesQuantity: isPaymentOnly ? 0 : 1,
+        salesQuantity: 0,
         emptyQuantity: 0,
         todayCredit: 0,
         totalAmountReceived: 0,
@@ -290,17 +333,13 @@ const SalesForm = () => {
         date: new Date().toISOString().split('T')[0],
         route: routeName,
         customPrice: null,
-        type: isPaymentOnly ? "payment" : "sale"
+        transactionType: isPaymentOnly ? "payment" : "sale"
       });
       setSelectedProduct(null);
       setSelectedCustomer(null);
-      
-      toast.success(isPaymentOnly ? "Payment recorded successfully!" : "Sale recorded successfully!");
-    } catch (err) {
-      console.error("Error processing transaction:", err);
-      toast.error(err.message);
-    } finally {
-      setLoading(prev => ({ ...prev, submitting: false }));
+    } catch (error) {
+      console.error("Error adding document: ", error);
+      toast.error(`Error recording ${isPaymentOnly ? "payment" : "sale"}: ${error.message}`);
     }
   };
 
@@ -319,6 +358,11 @@ const SalesForm = () => {
     <div className="container mt-2">
       <ToastContainer position="top-right" autoClose={3000} />
       
+      <div style={{ marginBottom: 16, padding: 8, background: "#f5f5f5", borderRadius: 6 }}>
+        <strong>Today's Total Sale Amount: </strong>
+        {loadingTodaySale ? "Loading..." : `₹${todayTotalSale}`}
+      </div>
+      
       <div className="card shadow">
         <div className="card-header bg-primary text-white d-flex justify-content-between align-items-center">
           <h2 className="mb-0">{isPaymentOnly ? "Payment" : "New Sale"}</h2>
@@ -328,7 +372,7 @@ const SalesForm = () => {
               type="checkbox"
               id="paymentToggle"
               checked={isPaymentOnly}
-              onChange={togglePaymentOnly}
+              onChange={togglePaymentMode}
             />
             <label className="form-check-label" htmlFor="paymentToggle">
               {isPaymentOnly ? "Switch to Sale Mode" : "Switch to Payment Mode"}
@@ -384,7 +428,6 @@ const SalesForm = () => {
                   placeholder="Select Customer"
                   isClearable
                   isSearchable
-                  isLoading={loading.initial}
                   noOptionsMessage={() => "No customers found"}
                   classNamePrefix="select"
                   styles={{
@@ -429,7 +472,6 @@ const SalesForm = () => {
                       placeholder="Select Product"
                       isClearable
                       isSearchable
-                      isLoading={loading.initial}
                       noOptionsMessage={() => "No products found"}
                       classNamePrefix="select"
                       styles={{
@@ -474,7 +516,6 @@ const SalesForm = () => {
                           placeholder="Enter custom price"
                           min="0"
                           step="0.01"
-                          disabled={loading.submitting}
                         />
                       </div>
                       
@@ -498,9 +539,8 @@ const SalesForm = () => {
                           name="salesQuantity"
                           value={formData.salesQuantity}
                           onChange={handleChange}
-                          
-                          
-                          disabled={loading.submitting}
+                          required
+                          min="1"
                         />
                       </div>
                       
@@ -512,9 +552,48 @@ const SalesForm = () => {
                           name="emptyQuantity"
                           value={formData.emptyQuantity}
                           onChange={handleChange}
-                          disabled={loading.submitting}
+                          required
+                          min="0"
                         />
-                        <small className="text-muted">Can be any number (negative values allowed)</small>
+                        <small className="text-muted">Current on hand: {selectedCustomer?.currentGasOnHand || 0}</small>
+                      </div>
+                    </div>
+                    
+                    <div className="row mb-3">
+                      <div className="col-md-4">
+                        <label className="form-label">Today Sale Amount (₹)</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={todaySaleAmount}
+                          readOnly
+                        />
+                      </div>
+                      
+                      <div className="col-md-4">
+                        <label className="form-label">Today Credit (₹)</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          name="todayCredit"
+                          value={formData.todayCredit}
+                          readOnly
+                        />
+                      </div>
+                      
+                      <div className="col-md-4">
+                        <label className="form-label">New Gas On Hand After Sale</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={
+                            selectedCustomer 
+                              ? (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity
+                              : 0
+                          }
+                          readOnly
+                        />
+                        <small className="text-muted">Can be negative if returning more than currently has</small>
                       </div>
                     </div>
                   </>
@@ -524,21 +603,11 @@ const SalesForm = () => {
             
             <div className="row mb-3">
               <div className="col-md-4">
-                <label className="form-label">Today's Credit (₹)</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  value={formData.todayCredit}
-                  readOnly
-                  disabled={isPaymentOnly}
-                />
-              </div>
-              
-              <div className="col-md-4">
                 <label className="form-label">Previous Balance (₹)</label>
                 <input
                   type="number"
                   className="form-control"
+                  name="previousBalance"
                   value={formData.previousBalance}
                   readOnly
                 />
@@ -552,53 +621,30 @@ const SalesForm = () => {
                   name="totalAmountReceived"
                   value={formData.totalAmountReceived}
                   onChange={handleChange}
+                  required
                   min="0"
-                  disabled={loading.submitting}
                 />
               </div>
-            </div>
-            
-            <div className="row mb-3">
-              <div className="col-md-6">
-                <label className="form-label">New Balance (₹)</label>
+              
+              <div className="col-md-4">
+                <label className="form-label">Total Balance (₹)</label>
                 <input
                   type="number"
                   className="form-control"
+                  name="totalBalance"
                   value={formData.totalBalance}
                   readOnly
                 />
               </div>
-              
-              {!isPaymentOnly && (
-                <div className="col-md-6">
-                  <label className="form-label">New Cylinder Count</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={
-                      selectedCustomer 
-                        ? (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity
-                        : 0
-                    }
-                    readOnly
-                  />
-                  <small className="text-muted">May be negative if returning more than current</small>
-                </div>
-              )}
             </div>
             
             <div className="d-grid gap-2 mt-4">
               <button 
                 type="submit" 
                 className="btn btn-primary btn-lg mb-5"
-                disabled={loading.submitting || !selectedCustomer || (!isPaymentOnly && !selectedProduct)}
+                disabled={!selectedCustomer || (!isPaymentOnly && !selectedProduct)}
               >
-                {loading.submitting ? (
-                  <>
-                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                    Processing...
-                  </>
-                ) : isPaymentOnly ? "Record Payment" : "Record Sale"}
+                {isPaymentOnly ? "Record Payment" : "Record Sale"}
               </button>
             </div>
           </form>
