@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect} from "react";
+import { useNavigate } from "react-router-dom";
 import { collection, addDoc, getDocs, query, where, updateDoc } from "firebase/firestore";
 import { db } from "../Firebase/config";
 import Select from 'react-select';
@@ -8,7 +9,7 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 
 const SalesForm = () => {
   const routeName = localStorage.getItem("routeName");
-  
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -245,103 +246,106 @@ const SalesForm = () => {
     }));
   };
 
-  // Handle form submission
   const handleSubmit = async (e) => {
-    e.preventDefault();
+  e.preventDefault();
+  
+  if (!selectedCustomer) {
+    toast.error("Please select a customer");
+    return;
+  }
+
+  if (!isPaymentOnly && !selectedProduct) {
+    toast.error("Please select a product");
+    return;
+  }
+
+  if (!isPaymentOnly && formData.salesQuantity <= 0) {
+    toast.error("Sales quantity must be greater than 0");
+    return;
+  }
+
+  try {
+    // Prepare transaction data
+    const transactionData = {
+      ...formData,
+      customerName: selectedCustomer.name,
+      customerPhone: selectedCustomer.phone,
+      customerAddress: selectedCustomer.address,
+      routeName: routeName,
+      timestamp: new Date(),
+      transactionType: isPaymentOnly ? "payment" : "sale"
+    };
+
+    // Add product details if it's a sale
+    if (!isPaymentOnly) {
+      const actualPrice = formData.customPrice || selectedProduct.price;
+      transactionData.productName = selectedProduct.name;
+      transactionData.productPrice = actualPrice;
+      transactionData.baseProductPrice = selectedProduct.price;
+      transactionData.isCustomPrice = formData.customPrice !== null;
+    } else {
+      // For payments, clear product-related fields
+      transactionData.productName = "";
+      transactionData.productPrice = 0;
+      transactionData.baseProductPrice = 0;
+      transactionData.isCustomPrice = false;
+      transactionData.salesQuantity = 0;
+      transactionData.emptyQuantity = 0;
+      transactionData.todayCredit = 0;
+    }
+
+    // Add transaction to sales collection
+    await addDoc(collection(db, "sales"), transactionData);
     
-    if (!selectedCustomer) {
-      toast.error("Please select a customer");
-      return;
-    }
-
-    if (!isPaymentOnly && !selectedProduct) {
-      toast.error("Please select a product");
-      return;
-    }
-
-    if (!isPaymentOnly && formData.salesQuantity <= 0) {
-      toast.error("Sales quantity must be greater than 0");
-      return;
-    }
-
-    try {
-      // Prepare transaction data
-      const transactionData = {
-        ...formData,
-        customerName: selectedCustomer.name,
-        customerPhone: selectedCustomer.phone,
-        customerAddress: selectedCustomer.address,
-        routeName: routeName,
-        timestamp: new Date(),
-        transactionType: isPaymentOnly ? "payment" : "sale"
-      };
-
-      // Add product details if it's a sale
-      if (!isPaymentOnly) {
-        const actualPrice = formData.customPrice || selectedProduct.price;
-        transactionData.productName = selectedProduct.name;
-        transactionData.productPrice = actualPrice;
-        transactionData.baseProductPrice = selectedProduct.price;
-        transactionData.isCustomPrice = formData.customPrice !== null;
-      } else {
-        // For payments, clear product-related fields
-        transactionData.productName = "";
-        transactionData.productPrice = 0;
-        transactionData.baseProductPrice = 0;
-        transactionData.isCustomPrice = false;
-        transactionData.salesQuantity = 0;
-        transactionData.emptyQuantity = 0;
-        transactionData.todayCredit = 0;
-      }
-
-      // Add transaction to sales collection
-      await addDoc(collection(db, "sales"), transactionData);
-      
-      // Update customer document
-      const customerQuery = query(
-        collection(db, "customers"),
-        where("id", "==", formData.customerId)
-      );
-      
-      const querySnapshot = await getDocs(customerQuery);
-      if (!querySnapshot.empty) {
-        const customerDocRef = querySnapshot.docs[0].ref;
-        await updateDoc(customerDocRef, {
-          currentBalance: formData.totalBalance,
-          currentGasOnHand: isPaymentOnly 
-            ? (selectedCustomer.currentGasOnHand || 0)
-            : (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity,
-          lastPurchaseDate: new Date()
-        });
-      }
-      
-      toast.success(isPaymentOnly ? "Payment recorded successfully!" : "Sale recorded successfully!");
-      
-      // Reset form
-      setFormData({
-        id: `TBG${new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14)}`,
-        customerId: "",
-        customerData: null,
-        productId: "",
-        productData: null,
-        salesQuantity: 0,
-        emptyQuantity: 0,
-        todayCredit: 0,
-        totalAmountReceived: 0,
-        totalBalance: 0,
-        previousBalance: 0,
-        date: new Date().toISOString().split('T')[0],
-        route: routeName,
-        customPrice: null,
-        transactionType: isPaymentOnly ? "payment" : "sale"
+    // Update customer document
+    const customerQuery = query(
+      collection(db, "customers"),
+      where("id", "==", formData.customerId)
+    );
+    
+    const querySnapshot = await getDocs(customerQuery);
+    if (!querySnapshot.empty) {
+      const customerDocRef = querySnapshot.docs[0].ref;
+      await updateDoc(customerDocRef, {
+        currentBalance: formData.totalBalance,
+        currentGasOnHand: isPaymentOnly 
+          ? (selectedCustomer.currentGasOnHand || 0)
+          : (selectedCustomer.currentGasOnHand || 0) - formData.emptyQuantity + formData.salesQuantity,
+        lastPurchaseDate: new Date()
       });
-      setSelectedProduct(null);
-      setSelectedCustomer(null);
-    } catch (error) {
-      console.error("Error adding document: ", error);
-      toast.error(`Error recording ${isPaymentOnly ? "payment" : "sale"}: ${error.message}`);
     }
-  };
+    
+    toast.success(isPaymentOnly ? "Payment recorded successfully!" : "Sale recorded successfully!", {
+      onClose: () => navigate(-1), // Navigate back when toast is closed
+      autoClose: 2000 // Close after 2 seconds
+    });
+    
+    // Reset form
+    setFormData({
+      id: `TBG${new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14)}`,
+      customerId: "",
+      customerData: null,
+      productId: "",
+      productData: null,
+      salesQuantity: 0,
+      emptyQuantity: 0,
+      todayCredit: 0,
+      totalAmountReceived: 0,
+      totalBalance: 0,
+      previousBalance: 0,
+      date: new Date().toISOString().split('T')[0],
+      route: routeName,
+      customPrice: null,
+      transactionType: isPaymentOnly ? "payment" : "sale"
+    });
+    setSelectedProduct(null);
+    setSelectedCustomer(null);
+
+  } catch (error) {
+    console.error("Error adding document: ", error);
+    toast.error(`Error recording ${isPaymentOnly ? "payment" : "sale"}: ${error.message}`);
+  }
+};
 
   if (!routeName) {
     return (
