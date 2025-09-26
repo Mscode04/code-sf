@@ -626,7 +626,7 @@ const SalesForm = () => {
                   value={formData.totalAmountReceived}
                   onChange={handleChange}
                   required
-                  min="0"
+                 
                 />
               </div>
               
