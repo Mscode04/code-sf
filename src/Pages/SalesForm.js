@@ -544,7 +544,7 @@ const SalesForm = () => {
                           value={formData.salesQuantity}
                           onChange={handleChange}
                           required
-                          min="1"
+                         
                         />
                       </div>
                       
